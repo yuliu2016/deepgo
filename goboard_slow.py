@@ -2,8 +2,9 @@ import copy
 from gotypes import Player, Point
 from typing import Optional
 
+
 class Move:
-    def __init__(self, point=None, is_pass=False, is_resign=False):
+    def __init__(self, point: "Point" = None, is_pass=False, is_resign=False):
         assert (point is not None) ^ is_pass ^ is_resign
         self.point = point
         self.is_play = point is not None
@@ -11,7 +12,7 @@ class Move:
         self.is_resign = is_resign
 
     @classmethod
-    def play(cls, point):
+    def play(cls, point: "Point"):
         return Move(point=point)
 
     @classmethod
@@ -29,10 +30,10 @@ class Group:
         self.stones = set(stones)
         self.liberties = set(liberties)
 
-    def remove_liberty(self, liberty_point):
+    def remove_liberty(self, liberty_point: "Point"):
         self.liberties.remove(liberty_point)
 
-    def add_liberty(self, liberty_point):
+    def add_liberty(self, liberty_point: "Point"):
         self.liberties.add(liberty_point)
 
     @property
@@ -58,7 +59,7 @@ class Board:
         self.cols = cols
         self._grid: "dict[Point, Optional[Group]]" = {}  # List of pairs of [Point, Group] for efficient lookup
 
-    def place_stone(self, player, point: "Point"):
+    def place_stone(self, player: "Player", point: "Point"):
         assert self.is_on_grid(point)
         assert self._grid.get(point) is None
         liberties = set()
@@ -98,7 +99,7 @@ class Board:
     def is_on_grid(self, point: "Point"):
         return 1 <= point.row <= self.rows and 1 <= point.col <= self.cols
 
-    def get(self, point):
+    def get(self, point: "Point"):
         group = self._grid.get(point)
         if group is None:
             return None
@@ -110,6 +111,7 @@ class Board:
             return None
         return group
 
+
 class GameState:
     def __init__(self, board: "Board", next_player: "Player",
                  previous_state: "Optional[GameState]", last_move: "Optional[Move]"):
@@ -118,7 +120,7 @@ class GameState:
         self.previous_state = previous_state
         self.last_move = last_move
 
-    def apply_move(self, move):
+    def apply_move(self, move: "Move"):
         if move.is_play:
             next_board = copy.deepcopy(self.board)
             next_board.place_stone(self.next_player, move.point)
@@ -135,6 +137,40 @@ class GameState:
         if second_last_move is None:
             return False
         return self.last_move.is_pass and second_last_move.is_pass
+
+    def is_self_capture(self, player: "Player", move: "Move"):
+        if not move.is_play:
+            return False
+        next_board = copy.deepcopy(self.board)
+        next_board.place_stone(player, move.point)
+        new_group = next_board.get_group(move.point)
+        return new_group.num_liberties == 0
+
+    def is_violate_super_ko(self, player: "Player", move: "Move"):
+        if not move.is_play:
+            return False
+        next_board = copy.deepcopy(self.board)
+        next_board.place_stone(player, move.point)
+        next_situation = player.other, next_board
+        past_state = self.previous_state
+        while past_state is not None:
+            if past_state.situation == next_situation:
+                return True
+            past_state = past_state.previous_state
+        return False
+
+    def is_valid_move(self, move: "Move"):
+        if self.is_over():
+            return False
+        if move.is_pass or move.is_resign:
+            return True
+        return self.board.get(move.point) is None and \
+               not self.is_self_capture(self.next_player, move) and \
+               not self.is_violate_super_ko(self.next_player, move)
+
+    @property
+    def situation(self):
+        return self.next_player, self.board
 
     @classmethod
     def new_game(cls, board_size):
