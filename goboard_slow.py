@@ -1,6 +1,6 @@
 import copy
 from gotypes import Player, Point
-
+from typing import Optional
 
 class Move:
     def __init__(self, point=None, is_pass=False, is_resign=False):
@@ -56,9 +56,9 @@ class Board:
     def __init__(self, rows, cols):
         self.rows = rows
         self.cols = cols
-        self._grid: "dict[Point, Group]" = {}  # List of pairs of [Point, Group] for efficient lookup
+        self._grid: "dict[Point, Optional[Group]]" = {}  # List of pairs of [Point, Group] for efficient lookup
 
-    def place_stone(self, player, point):
+    def place_stone(self, player, point: "Point"):
         assert self.is_on_grid(point)
         assert self._grid.get(point) is None
         liberties = set()
@@ -75,8 +75,27 @@ class Board:
                 if neighbour_group not in adjacent_opposite_colour:
                     adjacent_opposite_colour.append(neighbour_group)
         new_group = Group(player, {point}, liberties)
+        for group in adjacent_same_colour:
+            new_group = new_group.merge(group)
+        for point in new_group.stones:
+            self._grid[point] = new_group
+        for other_group in adjacent_opposite_colour:
+            other_group.remove_liberty(point)
+        for other_group in adjacent_opposite_colour:
+            if other_group.num_liberties == 0:
+                self.remove_group(other_group)
 
-    def is_on_grid(self, point):
+    def remove_group(self, group: "Group"):
+        for point in group.stones:
+            for neighbour in point.neighbours():
+                neighbour_group = self._grid.get(neighbour)
+                if neighbour_group is None:
+                    continue
+                if neighbour_group is not group:
+                    neighbour_group.add_liberty(point)
+            self._grid[point] = None
+
+    def is_on_grid(self, point: "Point"):
         return 1 <= point.row <= self.rows and 1 <= point.col <= self.cols
 
     def get(self, point):
@@ -90,3 +109,36 @@ class Board:
         if group is None:
             return None
         return group
+
+class GameState:
+    def __init__(self, board: "Board", next_player: "Player",
+                 previous_state: "Optional[GameState]", last_move: "Optional[Move]"):
+        self.board = board
+        self.next_player = next_player
+        self.previous_state = previous_state
+        self.last_move = last_move
+
+    def apply_move(self, move):
+        if move.is_play:
+            next_board = copy.deepcopy(self.board)
+            next_board.place_stone(self.next_player, move.point)
+        else:
+            next_board = self.board
+        return GameState(next_board, self.next_player.other, self, move)
+
+    def is_over(self):
+        if self.last_move is None:
+            return False
+        if self.last_move.is_resign:
+            return True
+        second_last_move = self.previous_state.last_move
+        if second_last_move is None:
+            return False
+        return self.last_move.is_pass and second_last_move.is_pass
+
+    @classmethod
+    def new_game(cls, board_size):
+        if isinstance(board_size, int):
+            board_size = (board_size, board_size)
+        board = Board(*board_size)
+        return GameState(board, Player.black, None, None)
